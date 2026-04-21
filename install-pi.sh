@@ -64,13 +64,24 @@ echo ""
 echo "→ Installing dependencies (curl, libfuse, libportaudio2, unclutter)…"
 DEBIAN_FRONTEND=noninteractive apt-get update -qq
 # libportaudio2  — sounddevice (LTC input) dlopens it at startup, not
-#                  bundled in the AppImage.
-# python3-pyqt6.qtsvg — kept for consistency with build-time deps even
-#                  though PyInstaller freezes its own PyQt6; harmless.
+#                  bundled in the AppImage. CRITICAL: without this the
+#                  Python import fails and kiosk systemd restart-loops.
+# libfuse*       — AppImage requires FUSE to mount itself
+# unclutter-xfixes — hides idle mouse cursor (kiosk UX)
+# Do NOT silence stderr with "|| true": a missing critical lib would
+# silently break the kiosk. Split CRITICAL from OPTIONAL so we fail
+# loudly on the essentials and forgive the nice-to-haves.
+echo "  → critical libs (libportaudio2, libfuse, ca-certificates, curl)…"
+if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        curl libfuse2 libfuse3-3 fuse3 ca-certificates libportaudio2; then
+  echo "ERROR: failed to install critical dependencies via apt."
+  echo "       Check apt sources (/etc/apt/sources.list.d/), then retry."
+  exit 1
+fi
+echo "  → optional libs (ufw, unclutter-xfixes)…"
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    curl libfuse2 libfuse3-3 fuse3 unclutter-xfixes ufw ca-certificates \
-    libportaudio2 \
-    >/dev/null 2>&1 || true
+    ufw unclutter-xfixes >/dev/null 2>&1 || \
+    echo "     (warn) optional package install failed — continuing anyway"
 
 # ── Download ──────────────────────────────────────────────────────────────────
 
@@ -128,6 +139,44 @@ echo ""
 echo "→ Running kiosk installer…"
 echo ""
 ./install-kiosk.sh --user "$TARGET_USER" --skip-hotspot
+
+# ── Post-install health check ─────────────────────────────────────────────────
+# `systemctl enable --now kuma-kiosk@USER.service` returns 0 if the unit got
+# enabled AND systemd successfully forked the process, EVEN IF that process
+# immediately exits with an error (systemd then enters a restart loop). So we
+# have to actively verify the service is running, not just "enabled".
+# Wait up to 20 s, checking once per second — long enough to absorb the
+# normal start-up time plus two restart attempts (Restart=always, RestartSec=2).
+echo ""
+echo "→ Verifying kiosk service actually started…"
+_SERVICE="kuma-kiosk@${TARGET_USER}.service"
+_HEALTHY=0
+for _i in $(seq 1 20); do
+    # "active (running)" OR "active (exited)" both OK; "activating (auto-restart)"
+    # or "failed" mean the unit is crash-looping or gave up.
+    if systemctl is-active --quiet "$_SERVICE"; then
+        _HEALTHY=1
+        break
+    fi
+    sleep 1
+done
+
+if [[ $_HEALTHY -eq 0 ]]; then
+    echo ""
+    echo "══════════════════════════════════════════════════════════════"
+    echo "  ✗ KUMA kiosk service failed to start cleanly"
+    echo "══════════════════════════════════════════════════════════════"
+    echo ""
+    echo "  The installer completed, but the service keeps crashing."
+    echo "  Most recent logs:"
+    echo ""
+    journalctl -u "$_SERVICE" -n 20 --no-pager --no-hostname 2>/dev/null \
+        | sed 's/^/    /'
+    echo ""
+    echo "  Full diagnostics: sudo journalctl -u $_SERVICE -n 200 --no-pager"
+    echo "  Retry install:   curl -fsSL https://raw.githubusercontent.com/pltech-dev/kuma-timer-releases/main/install-pi.sh | sudo bash"
+    exit 1
+fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────
 

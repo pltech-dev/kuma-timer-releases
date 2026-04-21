@@ -79,12 +79,17 @@ trap 'rm -rf "$TMPDIR"' EXIT
 cd "$TMPDIR"
 
 # Find the most-recently-published release (including pre-releases).
-# /releases/latest skips pre-releases, which would break installs on
-# rc/beta builds. The /releases list is ordered newest-first; we take
-# the first entry and pull everything from that tag.
+# /releases/latest skips pre-releases → breaks installs when only rc
+# builds exist. The /releases list endpoint doesn't sort by date, it
+# sorts by release-object ID (creation order of the RELEASE entity,
+# which can be older than the tag it points to if the release object
+# was created-then-updated). We fetch a window of recent releases and
+# pick the one with the newest published_at — the author's intent.
+# Python 3 ships with Pi OS Bookworm, so we use it (jq isn't default).
 echo "→ Looking up latest release tag…"
-LATEST_TAG="$(curl -fsSL "$GH_API/releases?per_page=1" \
-  | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+LATEST_TAG="$(curl -fsSL "$GH_API/releases?per_page=15" \
+  | python3 -c 'import json, sys; rel=json.load(sys.stdin); print(sorted(rel, key=lambda r: r["published_at"], reverse=True)[0]["tag_name"])' \
+  2>/dev/null || true)"
 if [[ -z "$LATEST_TAG" ]]; then
   echo "ERROR: couldn't resolve latest release tag from $GH_API"
   echo "       Check your internet connection, then try again."

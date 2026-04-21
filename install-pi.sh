@@ -15,8 +15,8 @@
 
 set -euo pipefail
 
-BASE_WEB="https://kuma.pl-tech.co.uk/kiosk"
-RELEASES="https://github.com/pltech-dev/kuma-timer-releases/releases/latest/download"
+GH_API="https://api.github.com/repos/pltech-dev/kuma-timer-releases"
+GH_DL="https://github.com/pltech-dev/kuma-timer-releases/releases/download"
 APPIMAGE_NAME="KUMA-Timer-linux-aarch64.AppImage"
 
 # ── Sanity checks ─────────────────────────────────────────────────────────────
@@ -78,24 +78,40 @@ TMPDIR="$(mktemp -d -t kuma-install-XXXXXX)"
 trap 'rm -rf "$TMPDIR"' EXIT
 cd "$TMPDIR"
 
-echo "→ Downloading latest AppImage from GitHub releases…"
+# Find the most-recently-published release (including pre-releases).
+# /releases/latest skips pre-releases, which would break installs on
+# rc/beta builds. The /releases list is ordered newest-first; we take
+# the first entry and pull everything from that tag.
+echo "→ Looking up latest release tag…"
+LATEST_TAG="$(curl -fsSL "$GH_API/releases?per_page=1" \
+  | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+if [[ -z "$LATEST_TAG" ]]; then
+  echo "ERROR: couldn't resolve latest release tag from $GH_API"
+  echo "       Check your internet connection, then try again."
+  exit 1
+fi
+echo "  → $LATEST_TAG"
+
+RELEASE_DL="$GH_DL/$LATEST_TAG"
+
+echo "→ Downloading AppImage ($LATEST_TAG)…"
 if ! curl -fL --retry 3 --retry-delay 2 -o "$APPIMAGE_NAME" \
-        "$RELEASES/$APPIMAGE_NAME"; then
-  echo "ERROR: failed to download AppImage from $RELEASES/$APPIMAGE_NAME"
+        "$RELEASE_DL/$APPIMAGE_NAME"; then
+  echo "ERROR: failed to download AppImage from $RELEASE_DL/$APPIMAGE_NAME"
   echo "       Check your internet connection, then try again."
   exit 1
 fi
 chmod +x "$APPIMAGE_NAME"
 
-echo "→ Downloading kiosk scripts…"
+echo "→ Downloading kiosk scripts ($LATEST_TAG)…"
 KIOSK_FILES=(
     install-kiosk.sh
     kuma-kiosk.service
     update-kuma.sh
 )
 for f in "${KIOSK_FILES[@]}"; do
-  if ! curl -fL --retry 3 --retry-delay 2 -o "$f" "$BASE_WEB/$f"; then
-    echo "ERROR: failed to download $f from $BASE_WEB/$f"
+  if ! curl -fL --retry 3 --retry-delay 2 -o "$f" "$RELEASE_DL/$f"; then
+    echo "ERROR: failed to download $f from $RELEASE_DL/$f"
     exit 1
   fi
 done

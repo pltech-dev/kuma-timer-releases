@@ -81,6 +81,7 @@ uninstall() {
     rm -f /etc/systemd/system/kuma-iptables-restore.service
     rm -f /etc/iptables/rules.v4
     rm -f /etc/sudoers.d/kuma-wifi
+    rm -f /etc/sudoers.d/kuma-selfupdate
     rm -f "/home/$TARGET_USER/.config/autostart/kuma-unclutter.desktop"
     rm -f "/home/$TARGET_USER/.config/autostart/disable-screensaver.desktop"
     rm -rf "$INSTALL_DIR"
@@ -242,6 +243,23 @@ iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports 5555
 iptables -t nat -A OUTPUT     -p tcp -o lo --dport 80 -j REDIRECT --to-ports 5555
 mkdir -p /etc/iptables
 iptables-save > /etc/iptables/rules.v4
+
+# Allow the kiosk user to run update-kuma.sh and systemctl restart of
+# the kuma-kiosk service without a password prompt. This is what lets
+# the web admin panel's "Update KUMA" button work — the Flask worker
+# runs as the kiosk user and shells out via `sudo -n`. Scoped tightly
+# to just those two commands (not all of root).
+cat > /etc/sudoers.d/kuma-selfupdate <<EOF
+$TARGET_USER ALL=(root) NOPASSWD: /opt/kuma-timer/update-kuma.sh
+$TARGET_USER ALL=(root) NOPASSWD: /bin/systemctl restart kuma-kiosk@${TARGET_USER}.service
+$TARGET_USER ALL=(root) NOPASSWD: /bin/systemctl stop kuma-kiosk@${TARGET_USER}.service
+$TARGET_USER ALL=(root) NOPASSWD: /bin/systemctl start kuma-kiosk@${TARGET_USER}.service
+EOF
+chmod 440 /etc/sudoers.d/kuma-selfupdate
+visudo -cf /etc/sudoers.d/kuma-selfupdate >/dev/null || {
+    echo "     (warn) self-update sudoers file invalid — removing, manual updates only"
+    rm -f /etc/sudoers.d/kuma-selfupdate
+}
 
 # Self-contained boot-time restore — no iptables-persistent required.
 cat > /etc/systemd/system/kuma-iptables-restore.service <<'EOF'

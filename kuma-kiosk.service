@@ -1,0 +1,41 @@
+[Unit]
+Description=KUMA Timer (Kiosk Mode)
+After=graphical.target network-online.target
+Wants=graphical.target
+# StartLimit* belongs in [Unit], not [Service]. When placed in [Service]
+# systemd silently ignores with "Unknown key 'StartLimitIntervalSec'" —
+# which meant our rate-limiting was never active. Fixed here.
+StartLimitBurst=10
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+# %i lets you run it as kuma-kiosk@pi.service when installing for a specific user.
+User=%i
+Group=%i
+
+# Wayland or X11 depending on distro; Pi OS with Raspberry Pi Connect uses
+# Wayland (labwc) by default on Bookworm+, older images use X11.
+Environment="DISPLAY=:0"
+Environment="WAYLAND_DISPLAY=wayland-0"
+Environment="XDG_RUNTIME_DIR=/run/user/1000"
+Environment="QT_QPA_PLATFORM=xcb"
+
+ExecStart=/opt/kuma-timer/KUMA-Timer.AppImage
+
+# Resilience — app always restarts, on crash or graceful quit.
+# The web admin 'Save & Restart' flow relies on `Restart=always`: the app
+# exits with code 0 after saving config, systemd brings it straight back
+# up with the new settings applied.
+Restart=always
+RestartSec=2
+
+# Let Qt grab input on first boot
+TimeoutStartSec=30
+
+# Log to journal so you can see crashes with `journalctl -u kuma-kiosk@pi`
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical.target

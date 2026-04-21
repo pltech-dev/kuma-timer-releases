@@ -135,15 +135,21 @@ if ! curl -fL --retry 3 --retry-delay 2 -o "$APPIMAGE_NAME" \
 fi
 chmod +x "$APPIMAGE_NAME"
 
-echo "→ Downloading kiosk scripts ($LATEST_TAG)…"
+echo "→ Downloading kiosk scripts (from main branch — latest fixes)…"
+# Kiosk installer scripts live on the kuma-timer-releases main branch,
+# NOT as release assets. This decouples script bug-fixes from AppImage
+# rebuilds — a kiosk-side regression can be patched in minutes via a
+# single git commit, without tagging a new release. The AppImage itself
+# is always pinned to a specific release tag (above).
+RAW_BASE="https://raw.githubusercontent.com/pltech-dev/kuma-timer-releases/main"
 KIOSK_FILES=(
     install-kiosk.sh
     kuma-kiosk.service
     update-kuma.sh
 )
 for f in "${KIOSK_FILES[@]}"; do
-  if ! curl -fL --retry 3 --retry-delay 2 -o "$f" "$RELEASE_DL/$f"; then
-    echo "ERROR: failed to download $f from $RELEASE_DL/$f"
+  if ! curl -fL --retry 3 --retry-delay 2 -o "$f" "$RAW_BASE/$f"; then
+    echo "ERROR: failed to download $f from $RAW_BASE/$f"
     exit 1
   fi
 done

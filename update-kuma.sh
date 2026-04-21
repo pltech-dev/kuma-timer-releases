@@ -6,32 +6,48 @@
 # doesn't start.
 #
 # Usage:
+#   sudo /opt/kuma-timer/update-kuma.sh                       # auto: latest release
 #   sudo /opt/kuma-timer/update-kuma.sh <path-to-new-AppImage>
+#   sudo /opt/kuma-timer/update-kuma.sh <URL-of-new-AppImage>
 #
-# Examples:
-#   # Update from a local download
-#   sudo /opt/kuma-timer/update-kuma.sh ~/Downloads/KUMA-Timer-1.8.1-aarch64.AppImage
-#
-#   # Update directly from a URL
-#   sudo /opt/kuma-timer/update-kuma.sh https://kuma.pl-tech.co.uk/downloads/v1.8.1/KUMA-Timer-1.8.1-aarch64.AppImage
+# With no argument the script resolves the newest release on
+# pltech-dev/kuma-timer-releases (pre-releases included) and downloads
+# its aarch64 AppImage. This is what the web-admin "Update now" button
+# calls.
 
 set -euo pipefail
 
 INSTALL_DIR="/opt/kuma-timer"
 BIN_NAME="KUMA-Timer.AppImage"
 SERVICE_NAME="kuma-kiosk"
+GH_API="https://api.github.com/repos/pltech-dev/kuma-timer-releases"
+GH_DL="https://github.com/pltech-dev/kuma-timer-releases/releases/download"
+APPIMAGE_ASSET="KUMA-Timer-linux-aarch64.AppImage"
 
 if [[ "$EUID" -ne 0 ]]; then
     echo "This script must run as root.  sudo $0 $*"
     exit 1
 fi
 
-if [[ $# -lt 1 ]]; then
-    echo "Usage:  sudo $0 <path-or-URL-of-new-AppImage>"
-    exit 1
+if [[ $# -ge 1 ]]; then
+    SOURCE="$1"
+else
+    # Auto-resolve latest release (including pre-releases). GitHub's
+    # /releases/latest endpoint skips pre-releases, so we use the list
+    # endpoint + python3 to sort by published_at. Python 3 ships with
+    # Pi OS Bookworm so no extra deps.
+    echo "→ Looking up latest KUMA release…"
+    LATEST_TAG="$(curl -fsSL "$GH_API/releases?per_page=15" \
+      | python3 -c 'import json, sys; rel=json.load(sys.stdin); print(sorted(rel, key=lambda r: r["published_at"], reverse=True)[0]["tag_name"])' \
+      2>/dev/null || true)"
+    if [[ -z "$LATEST_TAG" ]]; then
+        echo "ERROR: couldn't resolve latest release tag from GitHub."
+        echo "       Check internet connectivity, or pass a URL/path explicitly."
+        exit 1
+    fi
+    echo "  → $LATEST_TAG"
+    SOURCE="$GH_DL/$LATEST_TAG/$APPIMAGE_ASSET"
 fi
-
-SOURCE="$1"
 
 # Resolve the currently-running user's kiosk service (there's exactly one instance)
 ACTIVE_SVC="$(systemctl list-units --type=service --state=active --plain --no-legend 2>/dev/null \

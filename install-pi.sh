@@ -63,25 +63,41 @@ echo ""
 
 echo "→ Installing dependencies (curl, libfuse, libportaudio2, unclutter)…"
 DEBIAN_FRONTEND=noninteractive apt-get update -qq
-# libportaudio2  — sounddevice (LTC input) dlopens it at startup, not
-#                  bundled in the AppImage. CRITICAL: without this the
-#                  Python import fails and kiosk systemd restart-loops.
-# libfuse*       — AppImage requires FUSE to mount itself
-# unclutter-xfixes — hides idle mouse cursor (kiosk UX)
-# Do NOT silence stderr with "|| true": a missing critical lib would
-# silently break the kiosk. Split CRITICAL from OPTIONAL so we fail
-# loudly on the essentials and forgive the nice-to-haves.
-echo "  → critical libs (libportaudio2, libfuse, ca-certificates, curl)…"
+
+# ── Package names vary across Pi OS / Debian releases:
+#   Bookworm (original):  libfuse2       libfuse3-3  fuse3
+#   Bookworm (t64 ABI):   libfuse2t64    libfuse3t64 fuse3
+#   Trixie:               libfuse2t64    libfuse3-4  fuse3
+# apt auto-aliases libfuse2 → libfuse2t64 (friendly), but libfuse3-3 hard-
+# fails on systems that shipped libfuse3-4 or libfuse3t64. We resolve the
+# fuse3 package name dynamically and only mark libfuse2 as critical —
+# AppImage v2 runtime loads libfuse2; libfuse3 is only used by some tools.
+_fuse3_pkg=""
+for _p in libfuse3-3 libfuse3t64 libfuse3-4; do
+  if apt-cache show "$_p" >/dev/null 2>&1; then _fuse3_pkg="$_p"; break; fi
+done
+
+# libportaudio2  — sounddevice dlopens it at startup; missing = kiosk
+#                  restart-loop with "PortAudio library not found".
+# libfuse2       — AppImage v2 mount runtime.
+# Do NOT silence stderr: a missing critical lib must fail loudly so
+# we don't hand the user a Pi that silently doesn't work.
+echo "  → critical libs (libportaudio2, libfuse2, curl, ca-certificates)…"
 if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        curl libfuse2 libfuse3-3 fuse3 ca-certificates libportaudio2; then
+        curl libfuse2 ca-certificates libportaudio2; then
   echo "ERROR: failed to install critical dependencies via apt."
   echo "       Check apt sources (/etc/apt/sources.list.d/), then retry."
   exit 1
 fi
-echo "  → optional libs (ufw, unclutter-xfixes)…"
+
+# Optional: fuse3 stack (nicer AppImage startup on some distros) +
+# kiosk niceties. Never blocks install — we warn and move on.
+echo "  → optional libs (fuse3, ufw, unclutter-xfixes)…"
+_optional=(ufw unclutter-xfixes fuse3)
+[[ -n "$_fuse3_pkg" ]] && _optional+=("$_fuse3_pkg")
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    ufw unclutter-xfixes >/dev/null 2>&1 || \
-    echo "     (warn) optional package install failed — continuing anyway"
+    "${_optional[@]}" >/dev/null 2>&1 || \
+    echo "     (warn) some optional packages failed to install — continuing"
 
 # ── Download ──────────────────────────────────────────────────────────────────
 

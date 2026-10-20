@@ -37,8 +37,8 @@ else
     # endpoint + python3 to sort by published_at. Python 3 ships with
     # Pi OS Bookworm so no extra deps.
     echo "→ Looking up latest KUMA release…"
-    LATEST_TAG="$(curl -fsSL "$GH_API/releases?per_page=15" \
-      | python3 -c 'import json, sys; rel=json.load(sys.stdin); print(sorted(rel, key=lambda r: r["published_at"], reverse=True)[0]["tag_name"])' \
+    LATEST_TAG="$(curl -fsSL "$GH_API/releases?per_page=30" \
+      | python3 -c 'import json, sys; rel=json.load(sys.stdin); a=sys.argv[1]; ok=[r for r in rel if any(x["name"]==a for x in r.get("assets", []))]; print(sorted(ok, key=lambda r: r["published_at"], reverse=True)[0]["tag_name"])' "$APPIMAGE_ASSET" \
       2>/dev/null || true)"
     if [[ -z "$LATEST_TAG" ]]; then
         echo "ERROR: couldn't resolve latest release tag from GitHub."
